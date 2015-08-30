@@ -29,6 +29,9 @@ namespace WinFlashTool
         public MainForm()
         {
             InitializeComponent();
+            cbResize.Tag = cbResize.Text;
+            cbResize.Text = string.Format(cbResize.Tag.ToString(), "");
+
             _LastKnownFullDiskList = QueryAllDisks();
             _RefreshThread = new Thread(UpdateThreadBody);
             _RefreshThread.Start();
@@ -406,6 +409,15 @@ namespace WinFlashTool
             return MessageBox.Show(message, Text, MessageBoxButtons.RetryCancel, MessageBoxIcon.Warning) == DialogResult.Retry;
         }
 
+        class ResizeSkippedException : Exception
+        {
+            public ResizeSkippedException(string msg)
+                :base(msg)
+            {
+            }
+        }
+
+
         //Returns false if need a retry
         bool AttemptWrite(ThreadContext ctx, string devPath)
         {
@@ -504,7 +516,7 @@ namespace WinFlashTool
 
                     var devLength = ctx.dev.QueryLength().Length;
                     if ((ctx.ResizedPartition.Value.StartingLBA + ctx.ResizedPartition.Value.TotalSectorCount) * 512UL > devLength)
-                        throw new Exception("Image is too small");
+                        throw new ResizeSkippedException("Image is too small");
 
                     var pt = ParsedChangeFile.ReadPartitionTable(firstSector);
                     int partitionNumber = -1;
@@ -516,32 +528,32 @@ namespace WinFlashTool
                         }
 
                     if (partitionNumber == -1)
-                        throw new Exception("Matching partition not found in image");
+                        throw new ResizeSkippedException("Matching partition not found in image");
 
                     ulong newSizeInBytes = devLength - ctx.ResizedPartition.Value.StartingLBA * 512UL;
                     int offsetInBootSector = 0x1BE + partitionNumber * 0x10 + 0x0c;
                     if (BitConverter.ToUInt32(firstSector, offsetInBootSector) != ctx.ResizedPartition.Value.TotalSectorCount)
-                        throw new Exception("Internal error: wrong partition table offset");
+                        throw new ResizeSkippedException("Internal error: wrong partition table offset");
                     BitConverter.GetBytes((int)(newSizeInBytes / 512)).CopyTo(firstSector, offsetInBootSector);
 
                     UpdateProgress("Resizing file system...", 0, 0);
                     var info = new ProcessStartInfo
                     {
                         FileName = resizer,
-                        Arguments = string.Format("\"{0}@{1}/{2}", ctx.FileName, ctx.ResizedPartition.Value.StartingLBA * 512L, newSizeInBytes),
+                        Arguments = string.Format("-f \"{0}@{1}/{2}\"", ctx.FileName, ctx.ResizedPartition.Value.StartingLBA * 512L, newSizeInBytes),
                         CreateNoWindow = true,
                         UseShellExecute = false,
                     };
-
+                    
                     info.EnvironmentVariables["RESIZE2FS_CHANGE_FILE_DIR"] = resizeDir;
                     string chg = Path.Combine(resizeDir, Path.GetFileName(ctx.FileName) + ".chg");
 
                     var proc = Process.Start(info);
                     proc.WaitForExit();
                     if (proc.ExitCode != 0)
-                        throw new Exception("Failed to resize Ext2FS - exit code " + proc.ExitCode);
+                        throw new ResizeSkippedException("Failed to resize Ext2FS - exit code " + proc.ExitCode);
                     if (!File.Exists(chg))
-                        throw new Exception("Resize change file does not exist: " + chg);
+                        throw new ResizeSkippedException("Resize change file does not exist: " + chg);
 
                     UpdateProgress("Writing resized file system...", 0, 0);
                     using (var chf = new ParsedChangeFile(chg, ctx.ResizedPartition.Value.StartingLBA * 512, devLength))
@@ -577,6 +589,8 @@ namespace WinFlashTool
             {
                 if (ex == null)
                     MessageBox.Show("The image has been written successfully.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else if (ex is ResizeSkippedException)
+                    MessageBox.Show("The image has been written successfully, but the Ext2FS partition could not be extended due to the following error: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 else if (!(ex is OperationCanceledException))
                     MessageBox.Show(ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 GUIEnabled = true;
@@ -689,9 +703,15 @@ namespace WinFlashTool
             catch { }
 
             if (pt != null && pt.Length > 0 && pt[pt.Length - 1].Type == 0x83)
+            {
                 cbResize.Checked = cbResize.Enabled = true;
+                cbResize.Text = string.Format(cbResize.Tag.ToString(), " (" + StringHelpers.FormatByteCount(pt[pt.Length - 1].TotalSectorCount * 512L) + ")");
+            }
             else
+            {
                 cbResize.Checked = cbResize.Enabled = false;
+                cbResize.Text = string.Format(cbResize.Tag.ToString(), "");
+            }
         }
     }
 }

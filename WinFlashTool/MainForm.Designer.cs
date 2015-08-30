@@ -32,6 +32,7 @@
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(MainForm));
             this.lblIntro = new System.Windows.Forms.Label();
             this.gbSourceImage = new System.Windows.Forms.GroupBox();
+            this.cbResize = new System.Windows.Forms.CheckBox();
             this.lblFileName = new System.Windows.Forms.Label();
             this.btnBrowseImage = new System.Windows.Forms.Button();
             this.txtFileName = new System.Windows.Forms.TextBox();
@@ -51,7 +52,6 @@
             this.lblProgress = new System.Windows.Forms.ToolStripStatusLabel();
             this.toolStripStatusLabel2 = new System.Windows.Forms.ToolStripStatusLabel();
             this.toolStripProgressBar1 = new System.Windows.Forms.ToolStripProgressBar();
-            this.cbResize = new System.Windows.Forms.CheckBox();
             this.gbSourceImage.SuspendLayout();
             this.gbTargetDevice.SuspendLayout();
             this.statusStrip1.SuspendLayout();
@@ -81,6 +81,17 @@
             this.gbSourceImage.TabIndex = 1;
             this.gbSourceImage.TabStop = false;
             this.gbSourceImage.Text = "Source image";
+            // 
+            // cbResize
+            // 
+            this.cbResize.AutoSize = true;
+            this.cbResize.Location = new System.Drawing.Point(67, 42);
+            this.cbResize.Name = "cbResize";
+            this.cbResize.Size = new System.Drawing.Size(407, 17);
+            this.cbResize.TabIndex = 3;
+            this.cbResize.Text = "Reize the last Ext2FS partition{0} to the end of the storage device using resize2" +
+    "fs";
+            this.cbResize.UseVisualStyleBackColor = true;
             // 
             // lblFileName
             // 
@@ -276,16 +287,6 @@
             this.toolStripProgressBar1.Maximum = 1000;
             this.toolStripProgressBar1.Name = "toolStripProgressBar1";
             this.toolStripProgressBar1.Size = new System.Drawing.Size(100, 16);
-            // 
-            // cbResize
-            // 
-            this.cbResize.AutoSize = true;
-            this.cbResize.Location = new System.Drawing.Point(9, 41);
-            this.cbResize.Name = "cbResize";
-            this.cbResize.Size = new System.Drawing.Size(331, 17);
-            this.cbResize.TabIndex = 3;
-            this.cbResize.Text = "Reize the last Ext2FS partition until the end of the storage device";
-            this.cbResize.UseVisualStyleBackColor = true;
             // 
             // MainForm
             // 

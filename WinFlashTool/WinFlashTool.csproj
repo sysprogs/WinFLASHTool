@@ -96,7 +96,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Devices-media-flash-sd-mmc.ico" />
-    <EmbeddedResource Include="resize2fs.exe" />
+    <EmbeddedResource Include="..\e2fsprogs\resize\resize2fs.exe" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
