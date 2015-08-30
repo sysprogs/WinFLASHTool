@@ -120,7 +120,6 @@ int hooked_open_file(const char *pathname, int flags, mode_t mode)
 			changeFileName += ".chg";
 		}
 	}
-	else
 	
 	pFile->hChangeFile = CreateFileA(changeFileName.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	pFile->CurrentChangeFileSector = 0;

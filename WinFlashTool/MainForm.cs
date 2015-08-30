@@ -492,7 +492,16 @@ namespace WinFlashTool
 
                 if (ctx.ResizedPartition.HasValue)
                 {
-                    string resizer = @"E:\projects\IMPORTED\e2fsprogs\resize\resize2fs.exe";
+                    string resizeDir = Path.Combine(Path.GetTempPath(), "resize2fs." + Process.GetCurrentProcess().Id);
+                    Directory.CreateDirectory(resizeDir);
+                    string resizer = Path.Combine(resizeDir, "resize2fs.exe");
+                    using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("WinFlashTool.resize2fs.exe"))
+                    {
+                        byte[] data = new byte[s.Length];
+                        s.Read(data, 0, data.Length);
+                        File.WriteAllBytes(resizer, data);
+                    }
+
                     var devLength = ctx.dev.QueryLength().Length;
                     if ((ctx.ResizedPartition.Value.StartingLBA + ctx.ResizedPartition.Value.TotalSectorCount) * 512UL > devLength)
                         throw new Exception("Image is too small");
@@ -516,24 +525,35 @@ namespace WinFlashTool
                     BitConverter.GetBytes((int)(newSizeInBytes / 512)).CopyTo(firstSector, offsetInBootSector);
 
                     UpdateProgress("Resizing file system...", 0, 0);
-                    var proc = Process.Start(new ProcessStartInfo
+                    var info = new ProcessStartInfo
                     {
                         FileName = resizer,
                         Arguments = string.Format("\"{0}@{1}/{2}", ctx.FileName, ctx.ResizedPartition.Value.StartingLBA * 512L, newSizeInBytes),
                         CreateNoWindow = true,
-                        UseShellExecute = false
-                    });
+                        UseShellExecute = false,
+                    };
 
+                    info.EnvironmentVariables["RESIZE2FS_CHANGE_FILE_DIR"] = resizeDir;
+                    string chg = Path.Combine(resizeDir, Path.GetFileName(ctx.FileName) + ".chg");
+
+                    var proc = Process.Start(info);
                     proc.WaitForExit();
                     if (proc.ExitCode != 0)
                         throw new Exception("Failed to resize Ext2FS - exit code " + proc.ExitCode);
+                    if (!File.Exists(chg))
+                        throw new Exception("Resize change file does not exist: " + chg);
 
                     UpdateProgress("Writing resized file system...", 0, 0);
-                    string chg = ctx.FileName + ".chg";
                     using (var chf = new ParsedChangeFile(chg, ctx.ResizedPartition.Value.StartingLBA * 512, devLength))
                     {
                         chf.Apply(ctx.dev, (d, t) => UpdateProgress("Writing resized file system...", d, t));
                     }
+
+                    try
+                    {
+                        Directory.Delete(resizeDir, true);
+                    }
+                    catch { }
                 }
 
                 ctx.dev.SeekAbs(0);
