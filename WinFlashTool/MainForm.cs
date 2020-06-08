@@ -49,7 +49,7 @@ namespace WinFlashTool
                 }
                 catch
                 {
-                	
+
                 }
             }
 
@@ -197,7 +197,7 @@ namespace WinFlashTool
             }
             catch
             {
-            	
+
             }
             return disks;
         }
@@ -293,11 +293,12 @@ namespace WinFlashTool
 
         class ThreadContext
         {
-            public DiskDevice dev;
+            public long VolumeSize;
             public FileStream fs;
             public string FileName;
             public string devID;
             public ParsedChangeFile.PARTITION_RECORD? ResizedPartition;
+            internal DiskDevice.STORAGE_DEVICE_NUMBER DeviceNumber;
         }
 
         private bool GUIEnabled
@@ -322,7 +323,7 @@ namespace WinFlashTool
                     throw new Exception("Please select target device");
 
                 var rec = lvDevices.SelectedItems[0].Tag as DiskRecord;
-                var info = rec == null ? null : rec.Info;
+                var info = rec?.Info;
                 if (info == null)
                     throw new Exception("Please select a valid target device");
 
@@ -343,13 +344,15 @@ namespace WinFlashTool
 
                 _RegHelper.SetValue("LastImageFile", txtFileName.Text);
 
+                var number = dev.QueryDeviceNumber();
+
                 if (new EraseConfirmationForm(info, dev, volumeSize).ShowDialog() != DialogResult.OK)
                     return;
 
                 lblProgress.Text = "Preparing...";
                 GUIEnabled = false;
                 _AbortWriting = false;
-                var ctx = new ThreadContext { dev = dev, fs = fs, devID = info.DeviceID, FileName = txtFileName.Text};
+                var ctx = new ThreadContext { VolumeSize = volumeSize, DeviceNumber = number, fs = fs, devID = info.DeviceID, FileName = txtFileName.Text };
                 if (cbResize.Checked)
                 {
                     try
@@ -371,10 +374,8 @@ namespace WinFlashTool
             }
             finally
             {
-                if (fs != null)
-                    fs.Dispose();
-                if (dev != null)
-                    dev.Dispose();
+                fs?.Dispose();
+                dev?.Dispose();
             }
         }
 
@@ -412,38 +413,23 @@ namespace WinFlashTool
         class ResizeSkippedException : Exception
         {
             public ResizeSkippedException(string msg)
-                :base(msg)
+                : base(msg)
             {
             }
         }
 
 
-        //Returns false if need a retry
-        bool AttemptWrite(ThreadContext ctx, string devPath)
+        bool AttemptWrite(ThreadContext ctx, DiskDevice dev)
         {
-            DateTime start = DateTime.Now;
-            UpdateProgress("Resetting device...", 0, 0);
-            for (; ; )
-            {
-                ctx.dev = new DiskDevice(devPath);
-                if (ctx.dev.Write(new byte[SectorSize]) == SectorSize)
-                    break;
-                ctx.dev.Dispose();
-                ctx.dev = null;
-                if ((DateTime.Now - start).TotalSeconds > 10)
-                    throw new Exception("Cannot get write access to the device.");
-            }
-
-
             long totalSize = ctx.fs.Length, done = 0;
             const int bufferSize = 1024 * 1024;
             IntPtr buffer = IntPtr.Zero;
 
-            start = DateTime.Now;
+            var start = DateTime.Now;
 
             try
             {
-                ctx.dev.SeekAbs(0);
+                dev.SeekAbs(0);
 
                 byte[] firstSector = null;  //The very first sector will be written in the very end. Otherwise the partition driver might block us from writing the raw disk object.
 
@@ -473,13 +459,13 @@ namespace WinFlashTool
                         todo = ((todo + SectorSize - 1) / SectorSize) * SectorSize;
                     }
 
-                    if (ctx.dev.Write(buffer, todo) != todo)
+                    if (dev.Write(buffer, todo) != todo)
                         if (!AskRetry("Cannot write medium at offset " + done.ToString()))
                             throw new OperationCanceledException();
                         else
                             return false;
 
-                    ctx.dev.SeekRel(todo);
+                    dev.SeekRel(todo);
 
                     string statusText;
                     long msec = (long)(DateTime.Now - start).TotalMilliseconds;
@@ -514,7 +500,7 @@ namespace WinFlashTool
                         File.WriteAllBytes(resizer, data);
                     }
 
-                    var devLength = ctx.dev.QueryLength().Length;
+                    var devLength = dev.QueryLength().Length;
                     if ((ctx.ResizedPartition.Value.StartingLBA + ctx.ResizedPartition.Value.TotalSectorCount) * 512UL > devLength)
                         throw new ResizeSkippedException("Image is too small");
 
@@ -544,7 +530,7 @@ namespace WinFlashTool
                         CreateNoWindow = true,
                         UseShellExecute = false,
                     };
-                    
+
                     info.EnvironmentVariables["RESIZE2FS_CHANGE_FILE_DIR"] = resizeDir;
                     string chg = Path.Combine(resizeDir, Path.GetFileName(ctx.FileName) + ".chg");
 
@@ -558,7 +544,7 @@ namespace WinFlashTool
                     UpdateProgress("Writing resized file system...", 0, 0);
                     using (var chf = new ParsedChangeFile(chg, ctx.ResizedPartition.Value.StartingLBA * 512, devLength))
                     {
-                        chf.Apply(ctx.dev, (d, t) => UpdateProgress("Writing resized file system...", d, t));
+                        chf.Apply(dev, (d, t) => UpdateProgress("Writing resized file system...", d, t));
                     }
 
                     try
@@ -568,14 +554,15 @@ namespace WinFlashTool
                     catch { }
                 }
 
-                ctx.dev.SeekAbs(0);
-                ctx.dev.Write(firstSector);
+                dev.SeekAbs(0);
+                dev.Write(firstSector);
             }
             finally
             {
                 if (buffer != IntPtr.Zero)
                     Marshal.FreeCoTaskMem(buffer);
             }
+
             return true;
         }
 
@@ -602,44 +589,64 @@ namespace WinFlashTool
 
         bool _AbortWriting;
 
+        void RunDiskpart(string scriptContents, string errorMessage)
+        {
+            var tempFile = Path.GetTempFileName();
+            File.WriteAllText(tempFile, scriptContents);
+            try
+            {
+                List<string> output = new List<string>();
+                DataReceivedEventHandler handler = (s, e) => output.Add(e?.Data ?? "");
+
+                var proc = new Process();
+                proc.StartInfo.FileName = "diskpart.exe";
+                proc.StartInfo.Arguments = $"/s \"{tempFile}\"";
+                proc.StartInfo.UseShellExecute = false;
+                proc.StartInfo.RedirectStandardOutput = true;
+                proc.StartInfo.RedirectStandardError = true;
+                proc.StartInfo.CreateNoWindow = true;
+                proc.OutputDataReceived += handler;
+                proc.ErrorDataReceived += handler;
+                proc.Start();
+
+                proc.BeginOutputReadLine();
+                proc.BeginErrorReadLine();
+                proc.WaitForExit();
+                if (proc.ExitCode != 0)
+                    throw new Exception(errorMessage + "\r\n" + string.Join("\r\n", output.ToArray()));
+            }
+            finally
+            {
+                File.Delete(tempFile);
+            }
+
+        }
+
         void WriteThreadBody(object obj)
         {
             ThreadContext ctx = (ThreadContext)obj;
-
-            UpdateProgress("Erasing partition table...", 0, 0);
             try
             {
-                //Erase
-                ctx.dev.SeekAbs(0);
-                ctx.dev.Write(new byte[SectorSize]);
-                ctx.dev.Dispose();
-                ctx.dev = null;
+                UpdateProgress("Erasing partition table...", 0, 0);
 
-                string devPath = null;
-
-                using (var devenum = new DeviceEnumerator(GUID_DEVINTERFACE_DISK))
-                    foreach (var info in devenum.GetAllDevices())
-                    {
-                        if (info.DeviceID == ctx.devID)
-                        {
-                            devPath = info.DevicePath;
-                            if (!info.ChangeDeviceState(DeviceEnumerator.DICS.DICS_DISABLE))
-                                throw new Exception("Cannot reset the card reader. Please remove the card, put it back and retry.");
-                            if (!info.ChangeDeviceState(DeviceEnumerator.DICS.DICS_ENABLE))
-                                throw new Exception("Cannot re-enable the card reader. Please enable it manually using device manager.");
-                        }
-                    }
-
-                if (devPath == null)
-                    throw new Exception("Cannot reset the card reader. Please remove the card, put it back and retry.");
-
-                for (; ; )
+                using (var dev = new DiskDevice(ctx.DeviceNumber.PhysicalDrive))
                 {
-                    if (AttemptWrite(ctx, devPath))
-                        break;
+                    if (dev.QueryLength().Length != (ulong)ctx.VolumeSize)
+                        throw new Exception("Mismatching volume length");
                 }
 
-                ReportCompletion(null);
+                RunDiskpart($"SELECT DISK {ctx.DeviceNumber.DeviceNumber}\r\nCLEAN\r\nRESCAN\r\nEXIT", $"Diskpart failed to reset disk #{ctx.DeviceNumber}");
+
+                using (var dev = new DiskDevice(ctx.DeviceNumber.PhysicalDrive))
+                {
+                    for (; ; )
+                    {
+                        if (AttemptWrite(ctx, dev))
+                            break;
+                    }
+
+                    ReportCompletion(null);
+                }
             }
             catch (System.Exception ex)
             {
@@ -647,10 +654,7 @@ namespace WinFlashTool
             }
             finally
             {
-                if (ctx.fs != null)
-                    ctx.fs.Dispose();
-                if (ctx.dev != null)
-                    ctx.dev.Dispose();
+                ctx.fs?.Dispose();
             }
         }
 

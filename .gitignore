@@ -44,3 +44,4 @@ Release (KEXT)
 CodeDB
 /support/strgen/Release
 *.opensdf
+.vs

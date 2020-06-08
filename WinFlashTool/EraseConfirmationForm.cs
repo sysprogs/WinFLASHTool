@@ -48,7 +48,7 @@ namespace WinFlashTool
             if (num == null)
                 lblInternalName.Text = "Unknown";
             else
-                lblInternalName.Text = string.Format(@"\\.\PHYSICALDRIVE{0}", num.DeviceNumber);
+                lblInternalName.Text = num.PhysicalDrive;
 
             Dictionary<int, string> volumesByPartitionNumbers = null;
 

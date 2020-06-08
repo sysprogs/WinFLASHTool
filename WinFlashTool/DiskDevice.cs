@@ -34,6 +34,8 @@ namespace WinFlashTool
             public int DeviceType;
             public int DeviceNumber;
             public int PartitionNumber;
+
+            public string PhysicalDrive => $@"\\.\PHYSICALDRIVE{DeviceNumber}";
         };
 
         public enum STORAGE_BUS_TYPE
@@ -202,6 +204,7 @@ namespace WinFlashTool
         {
             uint done;
             DeviceControl.WriteFile(m_hFile, data, (uint)data.Length, out done, IntPtr.Zero);
+            int err = Marshal.GetLastWin32Error();
             return (int)done;
         }
 
@@ -256,10 +259,38 @@ namespace WinFlashTool
         }
 
         const int IOCTL_DISK_GET_LENGTH_INFO = 475228;
+        const int FSCTL_ALLOW_EXTENDED_DASD_IO = 0x00090083;
+        const int IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x00560000;
+        const int FSCTL_LOCK_VOLUME = 0x00090018;
 
         public GET_LENGTH_INFORMATION QueryLength()
         {
             return QueryStructure<GET_LENGTH_INFORMATION>(IOCTL_DISK_GET_LENGTH_INFO, null, true);
+        }
+
+
+        public int QueryDiskNumberForVolume()
+        {
+            byte[] result = new byte[1024];
+            uint done = DeviceIoControl(IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, null, result);
+            int extentCount = BitConverter.ToInt32(result, 0);
+            if (extentCount != 1)
+                throw new Exception("Unexpected disk extents count:" + extentCount);
+            return BitConverter.ToInt32(result, 8);
+        }
+
+        public void Lock()
+        {
+            try
+            {
+                DeviceIoControl(FSCTL_ALLOW_EXTENDED_DASD_IO, null, null);
+            }
+            catch (Win32Exception)
+            {
+                //Not supported for raw volumes
+            }
+
+            DeviceIoControl(FSCTL_LOCK_VOLUME, null, null);
         }
     }
 }
